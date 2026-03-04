@@ -1,13 +1,15 @@
 import Work from '../models/Work.js';
 import { v2 as cloudinary } from 'cloudinary';
 
-// @desc    Get all works (public)
-// @route   GET /api/works
-// @access  Public
+// ─────────────────────────────────────────────
+// PUBLIC
+// ─────────────────────────────────────────────
+
+// GET /api/works
 export const getWorks = async (req, res) => {
   try {
     const { category, limit = 10, page = 1 } = req.query;
-    
+
     const query = { isPublished: true };
     if (category && category !== 'all') {
       query.category = category;
@@ -31,31 +33,29 @@ export const getWorks = async (req, res) => {
   }
 };
 
-// @desc    Get single work by slug
-// @route   GET /api/works/:slug
-// @access  Public
+// GET /api/works/slug/:slug
 export const getWorkBySlug = async (req, res) => {
   try {
-    const work = await Work.findOne({ 
+    const work = await Work.findOne({
       slug: req.params.slug,
-      isPublished: true 
+      isPublished: true
     });
-    
+
     if (!work) {
       return res.status(404).json({ message: 'Work not found' });
     }
-    
+
     res.json(work);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
+// ─────────────────────────────────────────────
+// ADMIN
+// ─────────────────────────────────────────────
 
-
-// @desc    Get all works (admin)
-// @route   GET /api/works/admin/all
-// @access  Private/Admin
+// GET /api/works/admin/all
 export const getAdminWorks = async (req, res) => {
   try {
     const works = await Work.find().sort({ createdAt: -1 });
@@ -65,163 +65,173 @@ export const getAdminWorks = async (req, res) => {
   }
 };
 
-// @desc    Create work
-// @route   POST /api/works
-// @access  Private/Admin
+// GET /api/works/admin/:id
+export const getWorkById = async (req, res) => {
+  try {
+    const work = await Work.findById(req.params.id);
+    if (!work) {
+      return res.status(404).json({ message: 'Work not found' });
+    }
+    res.json(work);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+
+function parseArrayField(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  try {
+    if (typeof value === 'string' && value.startsWith('[')) {
+      return JSON.parse(value);
+    }
+    return value.split(',').map(i => i.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function buildInstagramReel(body, files, existing = null) {
+  const hasReel = body.hasReel === 'true' || body.hasReel === true;
+  if (!hasReel) return undefined;
+
+  const url = body.reelUrl || '';
+  let embedUrl = url;
+  if (url.includes('instagram.com/p/')) {
+    const code = url.split('/p/')[1]?.split('/')[0];
+    if (code) embedUrl = `https://www.instagram.com/p/${code}/embed`;
+  } else if (url.includes('instagram.com/reel/')) {
+    const code = url.split('/reel/')[1]?.split('/')[0];
+    if (code) embedUrl = `https://www.instagram.com/reel/${code}/embed`;
+  }
+
+  const reel = {
+    type: body.reelType || 'reel',
+    url,
+    embedUrl
+  };
+
+  const thumbnailFile = files?.thumbnail?.[0];
+  if (thumbnailFile) {
+    reel.thumbnail = {
+      url: thumbnailFile.path,
+      publicId: thumbnailFile.filename
+    };
+  } else if (existing?.thumbnail) {
+    reel.thumbnail = existing.thumbnail;
+  }
+
+  return reel;
+}
+
+// ─────────────────────────────────────────────
+// CREATE
+// ─────────────────────────────────────────────
+
+// POST /api/works
 export const createWork = async (req, res) => {
   try {
-    console.log('Create work request received');
-    console.log('Request body:', req.body);
-    console.log('Request files:', req.files);
-    console.log('Admin:', req.admin?._id);
-
     const workData = { ...req.body };
-    
-    // Handle featured image
-    if (req.file) {
-      console.log('Featured image received:', req.file.originalname);
+
+    // Featured image
+    const featuredFile = req.files?.featuredImage?.[0];
+    if (featuredFile) {
       workData.featuredImage = {
-        url: req.file.path,
-        publicId: req.file.filename
-      };
-    } else if (req.files && req.files.featuredImage) {
-      console.log('Featured image received in files object');
-      workData.featuredImage = {
-        url: req.files.featuredImage[0].path,
-        publicId: req.files.featuredImage[0].filename
+        url: featuredFile.path,
+        publicId: featuredFile.filename
       };
     }
 
-    // Handle Instagram reel
-    const hasReel = req.body.hasReel === 'true' || req.body.hasReel === true;
-    console.log('Has reel:', hasReel);
-    
-    if (hasReel) {
-      workData.instagramReel = {
-        type: req.body.reelType || 'reel',
-        url: req.body.reelUrl || '',
-        embedUrl: req.body.reelUrl?.includes('instagram.com') 
-          ? `https://www.instagram.com/p/${req.body.reelUrl.split('/p/')[1]?.split('/')[0]}/embed` 
-          : req.body.reelUrl
-      };
-      
-      // Handle reel thumbnail
-      if (req.files && req.files.thumbnail) {
-        console.log('Thumbnail received');
-        workData.instagramReel.thumbnail = {
-          url: req.files.thumbnail[0].path,
-          publicId: req.files.thumbnail[0].filename
-        };
-      }
+    // Instagram reel
+    const reel = buildInstagramReel(req.body, req.files);
+    if (reel) workData.instagramReel = reel;
+
+    // Arrays
+    workData.results = parseArrayField(workData.results);
+    workData.tags = parseArrayField(workData.tags);
+
+    // Case study (JSON string from form)
+    if (workData.caseStudy && typeof workData.caseStudy === 'string') {
+      try { workData.caseStudy = JSON.parse(workData.caseStudy); } catch { delete workData.caseStudy; }
     }
 
-    // Parse arrays
-    ['results', 'tags'].forEach(field => {
-      if (workData[field]) {
-        try {
-          if (Array.isArray(workData[field])) {
-            workData[field] = workData[field];
-          } else if (typeof workData[field] === 'string') {
-            if (workData[field].startsWith('[')) {
-              workData[field] = JSON.parse(workData[field]);
-            } else {
-              workData[field] = workData[field].split(',').map(item => item.trim()).filter(item => item);
-            }
-          }
-        } catch (e) {
-          console.log(`Error parsing ${field}:`, e);
-          workData[field] = [];
-        }
-      } else {
-        workData[field] = [];
-      }
-    });
+    // SEO (JSON string from form)
+    if (workData.seo && typeof workData.seo === 'string') {
+      try { workData.seo = JSON.parse(workData.seo); } catch { delete workData.seo; }
+    }
 
-    // Create work
     const work = await Work.create(workData);
-    console.log('Work created with ID:', work._id);
-    
     res.status(201).json(work);
   } catch (error) {
     console.error('Error creating work:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
 
-// @desc    Update work
-// @route   PUT /api/works/:id
-// @access  Private/Admin
-// In workController.js — updateWork fix
+// ─────────────────────────────────────────────
+// UPDATE
+// ─────────────────────────────────────────────
+
+// PUT /api/works/:id
 export const updateWork = async (req, res) => {
   try {
     const work = await Work.findById(req.params.id);
-    
     if (!work) {
       return res.status(404).json({ message: 'Work not found' });
     }
 
     const workData = { ...req.body };
 
-    // ✅ FIXED: handle req.files.featuredImage (from .fields())
-    const featuredImageFile = req.file || req.files?.featuredImage?.[0];
-    
-    if (featuredImageFile) {
+    // Featured image
+    const featuredFile = req.files?.featuredImage?.[0];
+    if (featuredFile) {
       if (work.featuredImage?.publicId) {
-        try {
-          await cloudinary.uploader.destroy(work.featuredImage.publicId);
-        } catch (e) {
-          console.error('Error deleting old image:', e);
+        try { await cloudinary.uploader.destroy(work.featuredImage.publicId); } catch (e) {
+          console.error('Error deleting old featured image:', e);
         }
       }
       workData.featuredImage = {
-        url: featuredImageFile.path,
-        publicId: featuredImageFile.filename
+        url: featuredFile.path,
+        publicId: featuredFile.filename
       };
     }
 
-    // ✅ Handle reel thumbnail on update too
-    const hasReel = req.body.hasReel === 'true' || req.body.hasReel === true;
-    if (hasReel) {
-      workData.instagramReel = {
-        type: req.body.reelType || 'reel',
-        url: req.body.reelUrl || '',
-        embedUrl: req.body.reelUrl?.includes('instagram.com')
-          ? `https://www.instagram.com/p/${req.body.reelUrl.split('/p/')[1]?.split('/')[0]}/embed`
-          : req.body.reelUrl
-      };
-
-      const thumbnailFile = req.files?.thumbnail?.[0];
-      if (thumbnailFile) {
-        if (work.instagramReel?.thumbnail?.publicId) {
-          try { await cloudinary.uploader.destroy(work.instagramReel.thumbnail.publicId); } catch(e) {}
-        }
-        workData.instagramReel.thumbnail = {
-          url: thumbnailFile.path,
-          publicId: thumbnailFile.filename
-        };
-      } else if (work.instagramReel?.thumbnail) {
-        // Keep existing thumbnail
-        workData.instagramReel.thumbnail = work.instagramReel.thumbnail;
+    // Instagram reel — delete old thumbnail if replaced
+    const reel = buildInstagramReel(req.body, req.files, work.instagramReel);
+    if (reel) {
+      const newThumbnailFile = req.files?.thumbnail?.[0];
+      if (newThumbnailFile && work.instagramReel?.thumbnail?.publicId) {
+        try { await cloudinary.uploader.destroy(work.instagramReel.thumbnail.publicId); } catch {}
       }
+      workData.instagramReel = reel;
+    } else {
+      // User removed the reel — clean up thumbnail from cloudinary
+      if (work.instagramReel?.thumbnail?.publicId) {
+        try { await cloudinary.uploader.destroy(work.instagramReel.thumbnail.publicId); } catch {}
+      }
+      workData.instagramReel = undefined;
     }
 
-    // Parse arrays
-    ['results', 'tags'].forEach(field => {
-      if (workData[field]) {
-        if (typeof workData[field] === 'string') {
-          try {
-            workData[field] = workData[field].startsWith('[')
-              ? JSON.parse(workData[field])
-              : workData[field].split(',').map(i => i.trim()).filter(Boolean);
-          } catch (e) {
-            workData[field] = [];
-          }
-        }
-      }
-    });
+    // Arrays
+    if (req.body.results !== undefined) workData.results = parseArrayField(workData.results);
+    if (req.body.tags !== undefined) workData.tags = parseArrayField(workData.tags);
+
+    // Case study
+    if (workData.caseStudy && typeof workData.caseStudy === 'string') {
+      try { workData.caseStudy = JSON.parse(workData.caseStudy); } catch { delete workData.caseStudy; }
+    }
+
+    // SEO
+    if (workData.seo && typeof workData.seo === 'string') {
+      try { workData.seo = JSON.parse(workData.seo); } catch { delete workData.seo; }
+    }
 
     const updatedWork = await Work.findByIdAndUpdate(
       req.params.id,
@@ -232,34 +242,30 @@ export const updateWork = async (req, res) => {
     res.json(updatedWork);
   } catch (error) {
     console.error('Error updating work:', error);
-    if (error.response?.status === 401 || error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ message: 'Unauthorized' });
-    }
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Delete work
-// @route   DELETE /api/works/:id
-// @access  Private/Admin
+// ─────────────────────────────────────────────
+// DELETE
+// ─────────────────────────────────────────────
+
+// DELETE /api/works/:id
 export const deleteWork = async (req, res) => {
   try {
     const work = await Work.findById(req.params.id);
-    
     if (!work) {
       return res.status(404).json({ message: 'Work not found' });
     }
 
-    // Delete images from cloudinary
     if (work.featuredImage?.publicId) {
       await cloudinary.uploader.destroy(work.featuredImage.publicId);
     }
-    
+
     if (work.instagramReel?.thumbnail?.publicId) {
       await cloudinary.uploader.destroy(work.instagramReel.thumbnail.publicId);
     }
 
-    // Delete gallery images
     if (work.gallery?.length) {
       for (const image of work.gallery) {
         if (image.publicId) {
@@ -271,21 +277,6 @@ export const deleteWork = async (req, res) => {
     await work.deleteOne();
     res.json({ message: 'Work removed' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-
-export const getWorkById = async (req, res) => {
-  try {
-    console.log('Fetching work by ID:', req.params.id);
-    const work = await Work.findById(req.params.id);
-    if (!work) {
-      return res.status(404).json({ message: 'Work not found' });
-    }
-    res.json(work);
-  } catch (error) {
-    console.error('Error fetching work by ID:', error);
     res.status(500).json({ message: error.message });
   }
 };

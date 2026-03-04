@@ -34,13 +34,19 @@ const workSchema = new mongoose.Schema({
   tags: [{
     type: String
   }],
-  
+
+  // Live website link (for web projects or any external URL)
+  liveUrl: {
+    type: String,
+    default: ''
+  },
+
   // Media
   featuredImage: {
     url: String,
     publicId: String
   },
-  
+
   // Instagram Reel support
   instagramReel: {
     type: {
@@ -55,14 +61,14 @@ const workSchema = new mongoose.Schema({
     },
     embedUrl: String
   },
-  
+
   // Gallery images
   gallery: [{
     url: String,
     publicId: String,
     caption: String
   }],
-  
+
   // Case study details
   caseStudy: {
     overview: String,
@@ -75,20 +81,20 @@ const workSchema = new mongoose.Schema({
       position: String
     }
   },
-  
+
   // SEO
   seo: {
     metaTitle: String,
     metaDescription: String,
     keywords: [String]
   },
-  
+
   // Status
   isPublished: {
     type: Boolean,
     default: true
   },
-  
+
   // Timestamps
   createdAt: {
     type: Date,
@@ -100,13 +106,11 @@ const workSchema = new mongoose.Schema({
   }
 });
 
-// Update timestamp on save
 workSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
 
-// Create slug from title
 workSchema.pre('validate', function(next) {
   if (this.title && !this.slug) {
     this.slug = this.title
