@@ -4,6 +4,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
 import workRoutes from './routes/workRoutes.js';
+import careerrouter from './routes/Careerroutes.js';
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.get('/api/test', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/works', workRoutes);
+app.use('/api/careers', careerrouter);
 
 app.use('/api/*', (req, res) => {
   res.status(404).json({ message: 'API endpoint not found' });

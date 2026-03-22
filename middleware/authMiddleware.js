@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const protect = async (req, res, next) => {
+  console.log("is heree")
   let token;
 
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
